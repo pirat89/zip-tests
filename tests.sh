@@ -10,6 +10,7 @@
 #       or alternative results (as FAILED_CHECK or something similar)
 
 zip="../zip"
+#zip=$(which zip)
 unzip=$(which unzip)
 scriptname=$(basename $0)
 TEST_DIR="test_dir"
@@ -40,6 +41,7 @@ mkdir $TEST_DIR || {
 
 FAILED=0
 PASSED=0
+SKIPPED=0 # some functions don't have to be available (e.g. bzip,...)
 ERRORS=0 # maybe will be able to used/implemented later
 __zip_version=$($zip -v | head -n 2 | tail -n 1 | cut -d " " -f 4)
 __unzip_version=$($unzip -vqqqq)
@@ -49,6 +51,7 @@ _test_EOK='eval [[ $? -eq 0 ]] || { log_error "Wrong ecode"; return 1; }'
 
 green='\e[1;32m'
 red='\e[1;31m'
+cyan='\e[1;36m'
 endColor='\e[0m'
 
 TEST_TITLE=""
@@ -76,6 +79,14 @@ test_passed() {
   echo -e "[  ${green}PASS${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
   PASSED=$[ $PASSED +1 ]
+}
+
+test_skipped() {
+  [ $PWD != $_SCRIPT_PWD ] && cd $_SCRIPT_PWD
+  clean_test_dir
+  echo -e "[  ${cyan}SKIP${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
+  __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
+  SKIPPED=$[ $SKIPPED +1 ]
 }
 
 # use this if you want print some error message
@@ -106,6 +117,28 @@ create_text() {
      < /usr/share/dict/words | head -c $chars
 }
 
+# create unique filename for files in $TEST_DIR
+# $1 prefix
+# $2 suffix
+create_unique_filename() {
+  echo $1 | grep -qE "^[a-zA-Z0-9_]+$"
+  [ $? -eq 0 ] && prefix=$1 || prefix="tmp_"
+
+  echo $1 | grep -qE "^[a-zA-Z0-9_]+$"
+  [ $? -eq 0 ] && suffix=$2 || suffix=""
+
+  file_counter=$( ls $TEST_DIR | wc -l )
+  while [ 1 ]; do
+    filename="${prefix}${file_counter}${suffix}"
+
+    [ ! -e "$TEST_DIR/$filename" ] && {
+       echo $filename
+       return 0
+    }
+    file_counter=$[ $file_counter +1 ]
+  done
+}
+
 # long lines - 100k characters
 # parameter sets length of file - default 10k
 create_text_file() {
@@ -115,13 +148,47 @@ create_text_file() {
   echo $filename
 }
 
-# not implemented - not important now
-create_binary_file() {
-  return 1
+# change 2 bits in compressed content
+# and print filename of archive (without path)
+create_easy_damaged_archive() {
+  filename=$( create_text_file 1000 )
+  eda="$TEST_DIR/$( create_unique_filename "eda_" ".tmp" )"
+  archive="$TEST_DIR/$( create_unique_filename "archive_" ".zip" )"
+  hex_file="$TEST_DIR/$( create_unique_filename "hex_" ".tmp" )"
+
+  $zip $archive $TEST_DIR/$filename >&2
+  xxd $archive $hex_file >&2
+  line_counter=0
+
+  while read line; do
+    line_counter=$[ $line_counter +1 ]
+    [ $line_counter -ne 10 ] && {
+      echo $line >> $eda
+      continue
+    }
+
+    # this line we easy damage
+    echo -n "$( echo $line | cut -d " " -f 1 ) " >> $eda
+    rest=$(echo $line | cut -d " " -f 1 --complement)
+    echo -n $(echo $rest | sed -r "s/^(..).*$/\1/" | tr "0123456789abcdef" "123456789abcdefe") \
+      >> $eda
+    echo $rest | sed -r "s/^..(.*)$/\1/" >> $eda
+  done < $hex_file
+  xxd -r $eda $archive >&2
+  echo ${archive#"$TEST_DIR/"}
 }
 
+# $1 - expected return value
+# $2 - reaul return value
+test_ecode() {
+  [ $# -ne 2 ] && {
+    log_error "test_ecode(): wrong count of arguments!"
+    return 2
+  }
 
-create_archive() {
+  [ $1 -eq $2 ] && return 0
+
+  log_error "Wrong exit code! Expected $1, but returned $2"
   return 1
 }
 
@@ -138,8 +205,6 @@ create_archive() {
 # add file - empty archive | success
 # delete file - deleted already | ?
 # delete file - deleted already and empty | ?
-# test archive -T | success
-# test archive -T - damaged | ?
 # test really big archive? | ?
 ## series of can't read zip and files | failed
 ## series zipfile format
@@ -171,9 +236,8 @@ test_1 () {
   set_title "Create archive.zip - unzip,diff verify"
   filename=$( create_text_file )
   $zip $TEST_DIR/archive.zip $TEST_DIR/$filename
-  status=$?
+  test_ecode 0 $? || return 1
 
-  $_test_EOK
   [ ! -e $TEST_DIR/archive.zip ] && return 1
   $unzip -d $TEST_DIR $TEST_DIR/archive.zip
   [ $? -ne 0 ] && {
@@ -208,7 +272,7 @@ test_2 () {
 test_3() {
   set_title "Create archive - file doesn't exists"
   $zip $TEST_DIR/archive $TEST_DIR/non_existing_file
-  [ $? -eq 12 ] || { log_error "Wrong ecode"; return 1; }
+  test_ecode 12 $? || return 1
   [ -e "$TEST_DIR/archive.zip" ] && {
     log_error "Archive was created but it shouldn't!"
     return 1
@@ -221,7 +285,7 @@ test_3() {
 test_4() {
   set_title "Create archive - without any file in list"
   $zip $TEST_DIR/archive
-  [ $? -eq 12 ] || { log_error "Wrong ecode"; return 1; }
+  test_ecode 12 $? || return 1
   [ -e "$TEST_DIR/archive.zip" ] && {
     log_error "Archive was created but it shouldn't!"
     return 1
@@ -253,7 +317,7 @@ test_6() {
   stdbuf -o echo -e "Secret text\n" > $TEST_DIR/tmp_0
 
   $zip -u $TEST_DIR/archive $TEST_DIR/tmp_0 $TEST_DIR/$filename
-  $_test_EOK
+  test_ecode 0 $? || return 1
   
   $unzip -d $TEST_DIR $TEST_DIR/archive.zip
   [ -f $DTEST_DIR/tmp_0 -a -f $DTEST_DIR/tmp_1 -a -f $DTEST_DIR/$filename ] || {
@@ -277,10 +341,7 @@ test_7() {
   echo "something" > $TEST_DIR/tmp_0
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0
   $zip -u $TEST_DIR/archive
-  [ $? -eq 12 ] || {
-    log_error "Update - error code - expected 12"
-    return 1
-  }
+  test_ecode 12 $? || return 1
 
   return 0
 }
@@ -309,11 +370,11 @@ test_9() {
   $zip $TEST_DIR/archive $TEST_DIR/*
   $zip -d $TEST_DIR/archive $TEST_DIR/tmp_1
 
-  $_test_EOK
+  test_ecode 0 $? || return 1
   lines=$( $zip -sf $TEST_DIR/archive | grep "tmp_[012]$" | wc -l )
   $zip -sf $TEST_DIR/archive | grep -q "tmp_1"
   [ $? -eq 1 -a $lines -eq 2 ] || {
-    log_error "File was not removed or somehting is wrong with other files"
+    log_error "File was not removed or something is wrong with other files"
     return 1
   }
 
@@ -327,10 +388,7 @@ test_10() {
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0
   $zip -d $TEST_DIR/archive $TEST_DIR/tmp_0
   $zip -u $TEST_DIR/archive > $TEST_DIR/log
-  [ $? -eq 13 ] || {
-    log_error "Wrong ecode"
-    return 1
-  }
+  test_ecode 13 $? || return 1
 
   grep -qE "warning.*empty" $TEST_DIR/log || {
     log_error "Warning missing or wrong warning message"
@@ -344,10 +402,7 @@ test_10() {
 test_11() {
   set_title "Updated archive doesn't exists"
   $zip -u $TEST_DIR/nothing_exists
-  [ $? -eq 13 ] || {
-    log_error "Expected code 13"
-    return 1
-  }
+  test_ecode 13 $? || return 1
 
   return 0
 }
@@ -358,10 +413,7 @@ test_12() {
   touch $TEST_DIR/tmp_0
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0
   $zip -u $TEST_DIR/archive $TEST_DIR/tmp_1 # > $TEST_DIR/log
-  [ $? -eq 12 ] || {
-    log_error "Wrong ecode"
-    return 1
-  }
+  test_ecode 12 $? || return 1
 
   return 0     
 }
@@ -373,10 +425,7 @@ test_13() {
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0
   rm -f $TEST_DIR/tmp_0
   $zip -u $TEST_DIR/archive $TEST_DIR/tmp_0 # > $TEST_DIR/log
-  [ $? -eq 12 ] || {
-    log_error "Wrong ecode"
-    return 1
-  }
+  test_ecode 12 $? || return 1
 
   return 0
 }
@@ -387,7 +436,7 @@ test_14() {
   filename=$( create_text_file )
   $zip $TEST_DIR/archive $TEST_DIR/$filename
   $zip $TEST_DIR/archive $TEST_DIR/$filename
-  $_test_EOK
+  test_ecode 0 $? || return 1
 
   return 0
 }
@@ -398,10 +447,7 @@ test_15() {
   touch $TEST_DIR/tmp_0
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0
   $zip -d $TEST_DIR/archive $TEST_DIR/tmp_1 > $TEST_DIR/log
-  [ $? -eq 12 ] || {
-    log_error "Wrong ecode"
-    return 1 
-  }
+  test_ecode 12 $? || return 1
 
   grep -qE "warning.*not matched" $TEST_DIR/log || {
     log_error "Wrong of missing warning"
@@ -418,10 +464,7 @@ test_16() {
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0
   $zip -d $TEST_DIR/archive $TEST_DIR/tmp_0
   $zip -d $TEST_DIR/archive $TEST_DIR/never_ever
-  [ $? -eq 13 ] || {
-    log_error "Wrong ecode"
-    return 1
-  }
+  test_ecode 13 $? || return 1
 
   return 0
 }
@@ -432,7 +475,7 @@ test_17() {
   touch $TEST_DIR/tmp_0
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0
   $zip -d $TEST_DIR/archive $TEST_DIR/tmp_0 > $TEST_DIR/log
-  $_test_EOK
+  test_ecode 0 $? || return 1
   
   grep -E "warning.*empty" $TEST_DIR/log || {
     log_error "Wrong of missing warning"
@@ -446,10 +489,7 @@ test_17() {
 test_18() {
   set_title "Wrong commandline parameters"
   $zip -w $TEST_DIR/something
-  [ $? -eq 16 ] || {
-    log_error "Wrong ecode"
-    return 1
-  }
+  test_ecode 16 $? || return 1
 
   return 0
 }
@@ -463,13 +503,10 @@ test_19() {
 
   chmod -x $DTEST_DIR
   $zip $DTEST_DIR/archive $TEST_DIR/$filename
+
   status=$?
   chmod +x $DTEST_DIR
-
-  [ $status -eq 15 ] || {
-    log_error "Wrong ecode - expected 15, but returned $status"
-    return 1
-  }
+  test_ecode 15 $status || return 1
 
   return 0
 }
@@ -480,16 +517,63 @@ test_20() {
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0
   chmod -w $TEST_DIR/archive.zip
   $zip -d $TEST_DIR/archive $TEST_DIR/tmp_0
+
   status=$?
   chmod +w $TEST_DIR/archive.zip
-
-  [ $status -eq 15 ] || {
-    log_error "Wrong code - expected 14, but returned $status"
-    return 1
-  }
+  test_ecode 15 $status || return 1
 
   return 0
 }
+
+# test archive -T | success
+test_21() {
+  set_title "Test the integrity of archive (success)"
+  filename=$( create_text_file 1000 )
+  zip $TEST_DIR/archive.zip $TEST_DIR/$filename
+  zip -T $TEST_DIR/archive.zip
+  test_ecode 0 $? || return 1
+
+  return 0
+}
+
+test_22() {
+  set_title "Test the integrity of the new archive (damaged file)"
+  archive=$( create_easy_damaged_archive )
+  zip -T $TEST_DIR/$archive
+  test_ecode 8 $? || return 1
+
+  return 0
+}
+
+test_23() {
+  set_title "Generic zipfile format error"
+  echo "Lorem ipsum, whatever..." > $TEST_DIR/archive.zip
+  zip -T $TEST_DIR/archive.zip
+  test_ecode 3 $? || return 1 
+  return 0
+}
+
+test_24() {
+  set_title "Update archive with corrupted data inside (modify original file)"
+  archive=$(create_easy_damaged_archive)
+  orig_file=$($zip -sf $TEST_DIR/$archive | grep -o "test_dir/.*")
+
+  # update is possible only if original file is changed now
+  # IMHO it would be automatically in future
+  touch -m $orig_file
+
+  # file should be updated (repaired) to original
+  cp $TEST_DIR/$archive $archive
+  $zip -u $TEST_DIR/$archive
+  test_ecode 0 $? || return 1
+
+  # test the integrity of archive again
+  $zip -T $TEST_DIR/$archive
+  test_ecode 0 $? || return 1
+
+  return 0
+}
+
 
 # Do not edit next lines!
 # TESTS ENDS
@@ -512,13 +596,14 @@ __tests_functions=$(cat $scriptname | tail -n $[ $__file_lines - $__tests_startl
   | head -n $__tests_lines | grep -E "^\s*[_a-zA-Z0-9]+\s*\(\)\s*\{" \
   | grep -oE "^\s*[_a-zA-Z0-9]+"; )
 for item in $__tests_functions; do
-  $item >&2 && test_passed || test_failed 
+  $item >&2 && { test_passed; continue; }
+  [ $? -eq 1 ] && test_failed || test_skipped
 done
 
 #################################################
 # RESULTS                                       #
 #################################################
-TOTAL=$[ $FAILED + $PASSED ]
+TOTAL=$[ $FAILED + $PASSED + $SKIPPED ]
 echo "
 ================================================
 =                 RESULTS                      =
@@ -526,4 +611,5 @@ echo "
 Total tests:  $TOTAL
 Passed:       $PASSED
 Failed:       $FAILED
+Skipped:      $SKIPPED
 "
