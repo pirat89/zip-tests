@@ -47,7 +47,6 @@ __zip_version=$($zip -v | head -n 2 | tail -n 1 | cut -d " " -f 4)
 __unzip_version=$($unzip -vqqqq)
 
 __TEST_COUNTER=1
-_test_EOK='eval [[ $? -eq 0 ]] || { log_error "Wrong ecode"; return 1; }'
 
 green='\e[1;32m'
 red='\e[1;31m'
@@ -209,9 +208,8 @@ test_ecode() {
 ## series of can't read zip and files | failed
 ## series zipfile format
 ## invalid comment format | 7
-## zip was interrupted | 9
-# problem with tmp file | 10
-# error writting | 14 (can't write) - I duno how test this now
+# error writing | 14 (can't write) - I duno how test this now
+# truncate archive - try repair and verify with unzip
 
 #################################################
 # Here add test functions.
@@ -224,9 +222,9 @@ test_ecode() {
 #   set_title "title/label of test" # it's required! for right output report
 #   # do what you want
 #   ....
-#   return 1 # FAILED
-#   ## or
 #   return 0 # PASSED
+#   return 1 # FAILED
+#   return 2 # SKIPPED
 #}
 
 
@@ -299,7 +297,7 @@ test_5() {
   set_title "Update - archive not exists"
   filename=$( create_text_file )
   $zip -u $TEST_DIR/archive $TEST_DIR/$filename 2> $TEST_DIR/log
-  $_test_EOK
+  test_ecode 0 $? || return 1
   [ -e "$TEST_DIR/archive.zip" ] || \
     { log_error "Archive wasn't created"; return 1; }
   cat $TEST_DIR/log | grep -iq "warning"
@@ -314,7 +312,8 @@ test_6() {
   touch $TEST_DIR/tmp_0 $TEST_DIR/tmp_1
   filename=$( create_text_file )
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0 $TEST_DIR/tmp_1
-  stdbuf -o echo -e "Secret text\n" > $TEST_DIR/tmp_0
+  sleep 1 # MUST BE!
+  echo "Secret text" >> $TEST_DIR/tmp_0
 
   $zip -u $TEST_DIR/archive $TEST_DIR/tmp_0 $TEST_DIR/$filename
   test_ecode 0 $? || return 1
@@ -559,11 +558,11 @@ test_24() {
   orig_file=$($zip -sf $TEST_DIR/$archive | grep -o "test_dir/.*")
 
   # update is possible only if original file is changed now
-  # IMHO it would be automatically in future
+  # IMHO it should be automatically when CRC is wrong in future
+  sleep 1
   touch -m $orig_file
 
   # file should be updated (repaired) to original
-  cp $TEST_DIR/$archive $archive
   $zip -u $TEST_DIR/$archive
   test_ecode 0 $? || return 1
 
@@ -574,6 +573,96 @@ test_24() {
   return 0
 }
 
+# zip was interrupted | 9
+test_25() {
+  set_title "Interrupt zip"
+  filename=$( create_text_file 50000000 ) # 50 MB
+  ( $zip $TEST_DIR/archive.zip $TEST_DIR/$filename ) &
+  pid=$!
+  ( sleep 0.2; kill -s SIGINT $pid ) &
+  wait $pid
+  test_ecode 9 $? || return 1
+
+  return 0
+}
+
+test_26() {
+  set_title "Create temp file in chosen path"
+  filename=$( create_text_file 50000000)
+  mkdir $DTEST_DIR
+  ( $zip -b $DTEST_DIR $TEST_DIR/archive $TEST_DIR/$filename ) &
+  pid=$!
+  [ $( ls $DTEST_DIR | wc -l ) -eq 0 ] && {
+    log_error "Tempfile was not created in chosen directory."
+    kill -s SIGINT $pid
+    return 1
+  }
+
+  kill -s SIGINT $pid
+  return 0
+}
+
+# problem with tmp file | 10
+test_27() {
+  set_title "Problem with tmp file (chosen path doesn't exists)"
+  filename=$( create_text_file 1000 )
+  $zip -b $TEST_DIR/not_existing_directory $TEST_DIR/archive $TEST_DIR/$filename
+  test_ecode 10 $? || return 1
+
+  return 0
+}
+
+test_28() {
+  set_title "Problem with tmp file (can't crate temp file)"
+  filename=$( create_text_file 1000 )
+  mkdir $DTEST_DIR
+  chmod -x $DTEST_DIR
+  $zip -b $DTEST_DIR $TEST_DIR/archive $TEST_DIR/$filename
+  test_ecode 10 $? || return 1
+
+  return 0
+}
+
+# series can't read errors
+test_29() {
+  set_title "Create archive - can't read file"
+  filename=$( create_text_file )
+  chmod -r $TEST_DIR/$filename
+  $zip $DTEST_DIR $TEST_DIR/$filename
+  test_ecode 18 $? || return 1
+
+  return 0
+}
+
+test_30() {
+  set_title "Update archive - can't read archive (consult with upstream)"
+  filename=$( create_text_file )
+  $zip $TEST_DIR/archive $TEST_DIR/$filename
+  chmod -r $TEST_DIR/archive.zip
+  echo "aa" >> $TEST_DIR/$filename
+  $zip -u $TEST_DIR/archive.zip
+  test_ecode 18 $? || return 1
+
+  return 0
+}
+
+test_31() {
+  set_title "Update archive - can't read only some files"
+  echo "file1" > $TEST_DIR/tmp0
+  echo "file2" > $TEST_DIR/tmp1
+  echo "file3" > $TEST_DIR/tmp2
+  touch $TEST_DIR/tmp3
+  $zip $TEST_DIR/archive $TEST_DIR/{tmp0,tmp1,tmp2}
+
+  sleep 1
+  echo "Secret text" > $TEST_DIR/tmp0
+  echo "Yep" >> $TEST_DIR/tmp1
+  chmod -r $TEST_DIR/tmp0
+  $zip -u $TEST_DIR/archive.zip
+  test_ecode 18 $? || return 1
+
+  return 0
+}
 
 # Do not edit next lines!
 # TESTS ENDS
@@ -613,3 +702,5 @@ Passed:       $PASSED
 Failed:       $FAILED
 Skipped:      $SKIPPED
 "
+rm -rf $TEST_DIR # clean mess
+
