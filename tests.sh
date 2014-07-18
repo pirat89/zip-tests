@@ -10,8 +10,9 @@
 #       or alternative results (as FAILED_CHECK or something similar)
 
 zip="../zip"
+unzip="../../unzip610b/unzip"
 #zip=$(which zip)
-unzip=$(which unzip)
+#unzip=$(which unzip)
 scriptname=$(basename $0)
 TEST_DIR="test_dir"
 cd ${0%$scriptname}
@@ -663,6 +664,124 @@ test_31() {
   chmod -r $TEST_DIR/tmp0
   $zip -u $TEST_DIR/archive.zip
   test_ecode 18 $? || return 1
+
+  return 0
+}
+
+test_32() {
+  set_title "Create archive with symlinks"
+  echo "Some next not funny text" > $TEST_DIR/tmp_0
+  ln -s ./tmp_0 $TEST_DIR/symlink_file
+
+  $zip --symlinks $TEST_DIR/archive.zip $TEST_DIR/{tmp_0,symlink_file}
+  test_ecode 0 $? || return 1
+
+  $unzip -d $TEST_DIR $TEST_DIR/archive.zip
+  status=$?
+  [ $status -ne 0 ] && {
+    log_error "Unzip: return $status but expected is 0 (Archive contains symlink)"
+    return 1
+  }
+
+  [ ! -L $DTEST_DIR/symlink_file ] && {
+    log_error "Unzipped file is not symlink!"
+    return 1
+  }
+
+  diff -q $TEST_DIR/tmp_0 $DTEST_DIR/symlink_file || {
+    log_error "Unzipped files are different (symlink)"
+    return 1
+  }
+
+  return 0
+}
+
+test_33() {
+  set_title "Create archive without --symlinks (one input file is symlink)"
+  echo "Some next not funny text" > $TEST_DIR/tmp_0
+  ln -s ./tmp_0 $TEST_DIR/symlink_file
+
+  $zip $TEST_DIR/archive.zip $TEST_DIR/{tmp_0,symlink_file}
+  test_ecode 0 $? || return 1
+
+  $unzip -d $TEST_DIR $TEST_DIR/archive.zip
+  status=$?
+  [ $status -ne 0 ] && {
+    log_error "Unzip: return $status but expected is 0 (Archive contains symlink)"
+    return 1
+  }
+
+  [ -L $DTEST_DIR/symlink_file ] && {
+    log_error "Unzziped file is symlink, but it shouldn't (option \"--symlinks\" wasn't used)"
+    return 1
+  }
+  
+  diff -q $TEST_DIR/tmp_0 $DTEST_DIR/symlink_file && \
+    diff -q $TEST_DIR/tmp_0 $DTEST_DIR/tmp_0 || {
+      log_error "Unzipped files are different (symlink)"
+      return 1
+    }
+
+  return 0
+}
+
+test_34() {
+  set_title "Create archive with many files and symlinks"
+  text=$( create_text 1000 )
+  mkdir -p $TEST_DIR/files/some
+  for i in {0..80000}; do
+    echo $text > "$TEST_DIR/files/tmp_$i"
+  done
+
+  echo "$( create_text 16000)" >> $TEST_DIR/files/tmp_152
+  echo "$( create_text 16000)" >> $TEST_DIR/files/tmp_153
+  echo "$( create_text 16000)" >> $TEST_DIR/files/tmp_154
+  cp $TEST_DIR/files/tmp_154 $TEST_DIR/files/some/juhuu
+  ln -s tmp_152 $TEST_DIR/files/syml_0
+  ln -s some/juhuu $TEST_DIR/files/u_syml_1
+  for i in {160..260}; do
+    ln -s tmp_$i $TEST_DIR/files/tmp_${i}_0
+  done
+
+  $zip -r --symlinks $TEST_DIR/archive.zip $TEST_DIR/* >/dev/null
+  test_ecode 0 $? || return 1
+
+  $unzip -d $TEST_DIR $TEST_DIR/archive.zip 2>&1 > $TEST_DIR/log_unzip
+  status=$?
+  [ $status -ne 0 ] && {
+    log_error "Unzip: return $status but expected is 0 (Archive contains symlink and many files)"
+    return 1
+  }
+
+  files_orig=$(ls $TEST_DIR/files/ | wc -l)
+  files_unzipped=$(ls $DTEST_DIR/files/ | wc -l)
+  [ $files_orig -ne $files_unzipped ] && {
+     log_error "Some files missing. Before: $files_orig - After: $files_unzipped"
+     return 1
+  }
+
+
+  missing=0
+  for i in {160..260}; do
+    [ ! -L $DTEST_DIR/files/tmp_${i}_0 ] && {
+      missing=1
+      break
+    }
+  done
+
+  [ -L $DTEST_DIR/files/syml_0 -a -L $DTEST_DIR/files/u_syml_1 -a $missing -eq 0 ] || {
+    log_error "(some) Symlinks was not created"
+    return 1
+  }
+
+  lines=$(cat $TEST_DIR/log_unzip | grep -E "\->\s*(tmp_[0-9]+|some/juhuu)$" | wc -l)
+  [ $lines -ne 103 ] && {
+    ## this archive is not affected by unzip bug https://bugzilla.redhat.com/show_bug.cgi?id=740012
+    ## if someone can create such archive here, please write me or send me patch/new test
+    ## e.g. this archive is affected https://github.com/mono/mono/archive/master.zip
+    log_error "Unzip decompress symlinks wrong. (Known bug in unzip 6.10b and older - patched on fedora 19 and newer)"
+    return 1
+  }
 
   return 0
 }
