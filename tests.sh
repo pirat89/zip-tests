@@ -588,10 +588,13 @@ test_25() {
 
 test_26() {
   set_title "Create temp file in chosen path"
-  filename=$( create_text_file 50000000)
+  filename=$( create_text_file 50000000) # 50 MB
   mkdir $DTEST_DIR
   ( $zip -b $DTEST_DIR $TEST_DIR/archive $TEST_DIR/$filename ) &
   pid=$!
+
+  # important - without sleep it's possible check dir before file is created
+  sleep 0.5
   [ $( ls $DTEST_DIR | wc -l ) -eq 0 ] && {
     log_error "Tempfile was not created in chosen directory."
     kill -s SIGINT $pid
