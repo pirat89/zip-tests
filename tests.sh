@@ -10,21 +10,26 @@
 #       or alternative results (as FAILED_CHECK or something similar)
 
 zip="../zip"
-unzip="../../unzip610b/unzip"
+zipnote="../zipnote"
 #zip=$(which zip)
-#unzip=$(which unzip)
+unzip=$(which unzip)
 scriptname=$(basename $0)
 TEST_DIR="test_dir"
 cd ${0%$scriptname}
 _SCRIPT_PWD=$PWD
 
 if [[ ! -e $zip ]]; then
-  echo "File $zip doesn't exists."
+  echo "Script Error: File $zip doesn't exists." >&2
   exit 1
 fi
 
 if [[ ! -e $unzip ]]; then
-  echo "File $unzip doesn't exists."
+  echo "Script Error : File $unzip doesn't exists." >&2
+  exit 1
+fi
+
+if [[ ! -e $zipnote ]]; then
+  echo "Script Error: File $zipnote doesn't exists." >&2
   exit 1
 fi
 
@@ -179,7 +184,7 @@ create_easy_damaged_archive() {
 }
 
 # $1 - expected return value
-# $2 - reaul return value
+# $2 - real return value
 test_ecode() {
   [ $# -ne 2 ] && {
     log_error "test_ecode(): wrong count of arguments!"
@@ -208,9 +213,9 @@ test_ecode() {
 # test really big archive? | ?
 ## series of can't read zip and files | failed
 ## series zipfile format
-## invalid comment format | 7
 # error writing | 14 (can't write) - I duno how test this now
-# truncate archive - try repair and verify with unzip
+# tests for zipnote and zipcloak
+## invalid comment format | 7
 
 #################################################
 # Here add test functions.
@@ -245,7 +250,7 @@ test_1 () {
   }
 
   [ ! -f $DTEST_DIR/$filename ] && {
-     log_error "Unzipped archive doesn't contain archived filed."
+     log_error "Unzipped archive doesn't contain archived file."
      return 1
   }
 
@@ -729,8 +734,8 @@ test_34() {
   set_title "Create archive with many files and symlinks"
   text=$( create_text 1000 )
   mkdir -p $TEST_DIR/files/some
-  for i in {0..80000}; do
-    echo $text > "$TEST_DIR/files/tmp_$i"
+  for i in {0..10000}; do
+    echo "$text" > "$TEST_DIR/files/tmp_$i"
   done
 
   echo "$( create_text 16000)" >> $TEST_DIR/files/tmp_152
@@ -756,7 +761,7 @@ test_34() {
   files_orig=$(ls $TEST_DIR/files/ | wc -l)
   files_unzipped=$(ls $DTEST_DIR/files/ | wc -l)
   [ $files_orig -ne $files_unzipped ] && {
-     log_error "Some files missing. Before: $files_orig - After: $files_unzipped"
+     log_error "Some files are missing. Before: $files_orig - After: $files_unzipped"
      return 1
   }
 
@@ -785,6 +790,88 @@ test_34() {
 
   return 0
 }
+
+test_35() {
+  set_title "Freshen archive (empty archive)"
+  touch $TEST_DIR/tmpfile
+  $zip $TEST_DIR/archive $TEST_DIR/tmpfile
+  $zip -d $TEST_DIR/archive.zip $TEST_DIR/tmpfile
+  $zip -f $TEST_DIR/archive.zip
+  test_ecode 13 $? || return 1
+
+  return 0
+}
+
+test_36() {
+  set_title "Freshen archive (test not adding new files)"
+  touch $TEST_DIR/tmp_0 $TEST_DIR/tmp_1
+  $zip $TEST_DIR/archive $TEST_DIR/tmp_0
+  $zip -f $TEST_DIR/archive.zip $TEST_DIR/tmp_1
+  test_ecode 12 $? || return 1
+
+  sleep 1
+  echo "And rains, and rains.." >> $TEST_DIR/tmp_0
+  $zip -f $TEST_DIR/archive.zip $TEST_DIR/*
+  test_ecode 0 $?
+
+  lines=$( $zip -sf $TEST_DIR/archive.zip | wc -l )
+  [ $lines -ne 3 ] && {
+    log_error "Freshen  - added files (or changed report!)"
+    return 1
+  }
+  
+  return 0
+}
+
+# truncate archive - try repair and verify with unzip
+test_37() {
+  set_title "Unexpected end of zipfile"
+  filename=$( create_text_file 1000 )
+  $zip $TEST_DIR/archive $TEST_DIR/$filename
+  size=$[ $(wc -c $TEST_DIR/archive.zip | cut -d " " -f 1) - 5 ]
+  truncate --size $size $TEST_DIR/archive.zip
+  $zip -T $TEST_DIR/archive
+  test_ecode 2 $? || return 1
+
+  ## -F and also -FF do not repair truncated end of archive
+
+  return 0
+}
+
+test_38() {
+  set_title "Insert zip file comment '-z' - verify by zipnote"
+  echo "whatever wherever" > $TEST_DIR/tmp_0
+  text="Short comment"
+
+  $zip $TEST_DIR/archive $TEST_DIR/tmp_0
+  echo "$text" | $zip -z $TEST_DIR/archive.zip
+  test_ecode 0 $? || return 1
+
+  $zipnote $TEST_DIR/archive.zip | tail -n 1 | grep -q "^$text$"
+  [ $? -ne 0 ] && {
+    log_error "Comment wasn't added or error in zipnote"
+    return 1
+  }
+
+  return 0
+}
+
+test_39() {
+  set_title "Insert comment for each file - verify zipnote"
+  touch $TEST_DIR/{tmp_0,tmp_1,tmp_2}
+  text="short_comment"
+  yes $text | zip -c $TEST_DIR/archive $TEST_DIR/tmp_*
+  test_ecode 0 $? || return
+
+  lines=$($zipnote $TEST_DIR/archive.zip | grep "$text" | wc -l)
+  [ $lines -ne 3 ] && {
+    log_error "Comments weren't added of error in zipnote"
+    return 1
+  }
+
+  return 0
+}
+
 
 # Do not edit next lines!
 # TESTS ENDS
