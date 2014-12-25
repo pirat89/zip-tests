@@ -39,6 +39,35 @@ mkdir $TEST_DIR || {
   exit 1
 }
 
+
+#################################################
+# PROCESS PARAMETERS                            #
+#################################################
+NOCOLORS=0
+while [[ $1 != "" ]]; do
+  param=$(echo $1 | sed -r "s/^(.*)=.*/\1/")
+
+  if [[ "$param" != "$1"  ]]; then
+     _VAL=$(echo $1 | sed -r "s/^.*=(.*)/\1/g");
+     _USED_NEXT=0
+  else
+     _VAL="$2"
+     _USED_NEXT=1
+  fi
+
+  case $param in
+    --nocolors)
+      NOCOLORS=1
+      ;;
+
+    *)
+    echo "Unknown option '$param'" >&2
+    exit 1
+    ;;
+  esac
+  shift
+done
+
 #################################################
 # BASIC FUNCTIONS & VARS                        #
 #################################################
@@ -54,10 +83,17 @@ __unzip_version=$($unzip -vqqqq)
 
 __TEST_COUNTER=1
 
-green='\e[1;32m'
-red='\e[1;31m'
-cyan='\e[1;36m'
-endColor='\e[0m'
+if [[ $NOCOLORS -eq 0 ]]; then
+  green='\e[1;32m'
+  red='\e[1;31m'
+  cyan='\e[1;36m'
+  endColor='\e[0m'
+else
+  green=""
+  red=""
+  cyan=""
+  endcolor=""
+fi
 
 TEST_TITLE=""
 DTEST_DIR="$TEST_DIR/$TEST_DIR" # double testdir - for unzipped files
@@ -104,7 +140,7 @@ log_error() {
 #################################################
 # You could use and insert here functions which are helpfull for testing.
 # However you SHOULDN'T modify them, without check of every function which
-# is using them!
+# use them!
 
 is_integer() {
   echo "$1" | grep -qE "^[0-9]+$"
@@ -534,8 +570,8 @@ test_20() {
 test_21() {
   set_title "Test the integrity of archive (success)"
   filename=$( create_text_file 1000 )
-  zip $TEST_DIR/archive.zip $TEST_DIR/$filename
-  zip -T $TEST_DIR/archive.zip
+  $zip $TEST_DIR/archive.zip $TEST_DIR/$filename
+  $zip -T $TEST_DIR/archive.zip
   test_ecode 0 $? || return 1
 
   return 0
@@ -544,7 +580,7 @@ test_21() {
 test_22() {
   set_title "Test the integrity of the new archive (damaged file)"
   archive=$( create_easy_damaged_archive )
-  zip -T $TEST_DIR/$archive
+  $zip -T $TEST_DIR/$archive
   test_ecode 8 $? || return 1
 
   return 0
@@ -553,7 +589,7 @@ test_22() {
 test_23() {
   set_title "Generic zipfile format error"
   echo "Lorem ipsum, whatever..." > $TEST_DIR/archive.zip
-  zip -T $TEST_DIR/archive.zip
+  $zip -T $TEST_DIR/archive.zip
   test_ecode 3 $? || return 1 
   return 0
 }
@@ -861,11 +897,84 @@ test_39() {
   touch $TEST_DIR/{tmp_0,tmp_1,tmp_2}
   text="short_comment"
   yes $text | zip -c $TEST_DIR/archive $TEST_DIR/tmp_*
-  test_ecode 0 $? || return
+  test_ecode 0 $? || return 1
 
   lines=$($zipnote $TEST_DIR/archive.zip | grep "$text" | wc -l)
   [ $lines -ne 3 ] && {
     log_error "Comments weren't added of error in zipnote"
+    return 1
+  }
+
+  return 0
+}
+
+test_40() {
+  # when patch will be created, this test should be modified
+  # because probably new option will be created
+  set_title "Acrhive with too long filename - unzip (may it will not be fixed)"
+  ## skip if you you forget copy special test archives too
+  [ -f "too_long_filename.zip" ] || return 2
+  cp too_long_filename.zip $TEST_DIR/too_long_filename.zip
+
+  $unzip -l $TEST_DIR/too_long_filename.zip | head -n4 | tail -n1 | cut -d " " -t 15- \
+    | grep "^[[:space:][:alnum:]_-]+$" || return 1
+  return 0
+}
+
+test_41() {
+  set_title "Rename files in archive by zipnote"
+  return 2
+  # this is dangerous even for testing !!
+  # zipnote is killed by SIGSEGV the often, but sometimes is freezing
+  # and can't be interrupted even by SIGTERM (only sigkill)
+  # and I don't want start/create know test which is permanently wrong and
+  # needs special construction for interruption by other processe
+
+  # TODO: create test with safe run of zipnote
+
+  return 0
+}
+
+# wrong argument | 16
+test_42() {
+  set_title "Split archive  - wrong argument (lesser then minimum size of chunk)"
+  filename="$( create_text_file $[ 2**20 ] )"
+  $zip $TEST_DIR/archive.zip -s 30k "$TEST_DIR/$filename"
+  test_ecode 16 $? || return 1
+  return 0
+}
+
+test_43() {
+  set_title "Split archive - archive has lesser size then chunk"
+  filename="$( create_text_file $[ 2**20 ] )"
+  $zip $TEST_DIR/archive.zip -s 2m "$TEST_DIR/$filename"
+  test_ecode 0 $? || return 1
+
+  mm_count=$(ls -1 $TEST_DIR/archive.* | wc -l)
+  [[ $mm_count -eq 1 ]] || return 1
+
+  return 0
+}
+
+test_44() {
+  set_title "Split archive"
+  filename="$( create_text_file $[ 2**20 ] )"
+  $zip "$TEST_DIR/archive_split" -s 128k "$TEST_DIR/$filename"
+
+  # we must check sum size of archive and then calculate
+  # how many files we want..
+  sum_size=$(ls -lt $TEST_DIR/archive_split.* | awk '{ x+=$5 }END{ print x }')
+
+  counts=$(ls -lt $TEST_DIR/archive_split.* | wc -l)
+  expected_counts=$[ $sum_size / (2**17) ]
+  [[ $sum_size -gt $[ $expected_counts * 2**17 ] ]] && expected_counts=$[ $expected_counts + 1 ]
+  [[ $counts -ne $expected_counts ]] && {
+    log_error "Wrong number of counts: expected $expected_counts - exists $counts"
+    return 1
+  }
+
+  [[ "$(ls -t $TEST_DIR/archive_split.* | head -n1)" == "$TEST_DIR/archive_split.zip" ]] || {
+    log_error "Last file doesn't have extension/suffix .zip"
     return 1
   }
 
