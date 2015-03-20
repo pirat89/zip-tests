@@ -1,44 +1,46 @@
 #!/bin/bash
-# This script is created for testing on Linux systems
+# This script is created for testing of InfoZip utilities on Linux systems
 # and probably will not work right on the other system.
 # I didn't test it.
 
-# for some tests could be used unzip, for checking of differents
-# between original data and zipped/unzipped data
 # - I hope that unzip will not be generator of errors :-)
 # NOTE: may I will add some option for skipping unzip-tests 
 #       or alternative results (as FAILED_CHECK or something similar)
 
-zip="../zip"
-zipnote="../zipnote"
-#zip=$(which zip)
+#zip="../zip"
+#unzip="../unzip"
+#zipnote="../zipnote"
+zipnote=$( which zipnote )
+zip=$(which zip)
 unzip=$(which unzip)
 scriptname=$(basename $0)
 TEST_DIR="test_dir"
 cd ${0%$scriptname}
 _SCRIPT_PWD=$PWD
 
-if [[ ! -e $zip ]]; then
-  echo "Script Error: File $zip doesn't exists." >&2
-  exit 1
-fi
 
-if [[ ! -e $unzip ]]; then
-  echo "Script Error : File $unzip doesn't exists." >&2
-  exit 1
-fi
+#################################################
+# USAGE
+#################################################
+print_usage() {
+  echo "
+ tests.sh [--nocolors] [--unzip FILE] [--zip FILE] [--zipnote FILE]
+          [-h | --help]
 
-if [[ ! -e $zipnote ]]; then
-  echo "Script Error: File $zipnote doesn't exists." >&2
-  exit 1
-fi
+    --nocolors      No colored output
+    
+    --unzip FILE    Will be used this script as unzip.
+                    Default: $(which unzip)   
 
-rm -rf $TEST_DIR
-mkdir $TEST_DIR || {
-  echo "Error: test directory wasn't created!"
-  exit 1
+    --zip FILE      Will be sed this script as zip.
+                    Default: $(which zip)
+
+    --zipnote FILE  Will be used this script as zipnote
+                    Default: $(which zipnote)
+
+    -h, --help      Print this help.
+"
 }
-
 
 #################################################
 # PROCESS PARAMETERS                            #
@@ -56,8 +58,28 @@ while [[ $1 != "" ]]; do
   fi
 
   case $param in
+    --help | -h)
+      print_usage
+      exit 0
+      ;;
+
     --nocolors)
       NOCOLORS=1
+      ;;
+
+    --unzip)
+      unzip=$_VAL
+      shift $_USED_NEXT
+      ;;
+
+    --zip)
+      zip=$_VAL
+      shift $_USED_NEXT
+      ;;
+
+    --zipnote)
+      zipnote=$_VAL
+      shift $_USED_NEXT
       ;;
 
     *)
@@ -67,6 +89,29 @@ while [[ $1 != "" ]]; do
   esac
   shift
 done
+
+#################################################
+#################################################
+if [[ ! -e "$zip" ]]; then
+  echo "Script Error: File $zip doesn't exists." >&2
+  exit 1
+fi
+
+if [[ ! -e "$unzip" ]]; then
+  echo "Script Error : File $unzip doesn't exists." >&2
+  exit 1
+fi
+
+if [[ ! -e "$zipnote" ]]; then
+  echo "Script Error: File $zipnote doesn't exists." >&2
+  exit 1
+fi
+
+rm -rf $TEST_DIR
+mkdir $TEST_DIR || {
+  echo "Error: test directory wasn't created!"
+  exit 1
+}
 
 #################################################
 # BASIC FUNCTIONS & VARS                        #
@@ -153,9 +198,9 @@ create_text() {
   # optional parameter for setting length of text
 
   is_integer $1 && chars=$1 || chars=100000
-  ruby -e 'a=STDIN.readlines;500.times do;b=[];20.times do;
+  echo $(ruby -e 'a=STDIN.readlines;500.times do;b=[];20.times do;
            b << a[rand(a.size)].chomp end; puts b.join(" "); end' \
-     < /usr/share/dict/words | head -c $chars
+     < /usr/share/dict/words ) | head -c $chars
 }
 
 # create unique filename for files in $TEST_DIR
@@ -185,7 +230,7 @@ create_unique_filename() {
 create_text_file() {
   filename=$( echo -e "tmp_"$( ls $TEST_DIR | wc -l ))
   is_integer $1 && chars=$1 || chars=10000
-  yes $( create_text ) | head -c $chars > $TEST_DIR/$filename
+  yes "$( create_text )" | head -c $chars > $TEST_DIR/$filename
   echo $filename
 }
 
@@ -896,7 +941,7 @@ test_39() {
   set_title "Insert comment for each file - verify zipnote"
   touch $TEST_DIR/{tmp_0,tmp_1,tmp_2}
   text="short_comment"
-  yes $text | zip -c $TEST_DIR/archive $TEST_DIR/tmp_*
+  yes "$text" | zip -c $TEST_DIR/archive $TEST_DIR/tmp_*
   test_ecode 0 $? || return 1
 
   lines=$($zipnote $TEST_DIR/archive.zip | grep "$text" | wc -l)
@@ -978,8 +1023,13 @@ test_44() {
     return 1
   }
 
+  #TODO add zip -FF and join everything back together.
+  # then unzip archive and compare result
+  # it's good check before testing of support by unzip
+
   return 0
 }
+
 
 
 # Do not edit next lines!
