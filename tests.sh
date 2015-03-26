@@ -4,19 +4,24 @@
 # I didn't test it.
 
 # - I hope that unzip will not be generator of errors :-)
-# NOTE: may I will add some option for skipping unzip-tests 
+# NOTE: may I will add some option for skipping unzip-tests
 #       or alternative results (as FAILED_CHECK or something similar)
+
+#TODO: store results of tests to variable (array). add function for
+# check of previous results
+# add option for print of results s
 
 #zip="../zip"
 #unzip="../unzip"
 #zipnote="../zipnote"
-zipnote=$( which zipnote )
-zip=$(which zip)
-unzip=$(which unzip)
-scriptname=$(basename $0)
+zipnote="$( which zipnote )"
+zip="$(which zip)"
+unzip="$(which unzip)"
+scriptname="$(basename "$0")"
 TEST_DIR="test_dir"
-cd ${0%$scriptname}
-_SCRIPT_PWD=$PWD
+cd "${0%$scriptname}"
+_SCRIPT_PWD="$PWD"
+COMPACT=0
 
 
 #################################################
@@ -28,15 +33,21 @@ print_usage() {
           [-h | --help]
 
     --nocolors      No colored output
-    
+
     --unzip FILE    Will be used this script as unzip.
-                    Default: $(which unzip)   
+                    Default: $(which unzip)
 
     --zip FILE      Will be sed this script as zip.
                     Default: $(which zip)
 
     --zipnote FILE  Will be used this script as zipnote
                     Default: $(which zipnote)
+
+    --compact       Print results together after end of testing
+
+    --compact2      Print results twice - during testing and after tests.
+                    You will see results together and then find err messages
+                    responding to results.
 
     -h, --help      Print this help.
 "
@@ -47,17 +58,17 @@ print_usage() {
 #################################################
 NOCOLORS=0
 while [[ $1 != "" ]]; do
-  param=$(echo $1 | sed -r "s/^(.*)=.*/\1/")
+  param="$(echo $1 | sed -r "s/^(.*)=.*/\1/")"
 
   if [[ "$param" != "$1"  ]]; then
-     _VAL=$(echo $1 | sed -r "s/^.*=(.*)/\1/g");
+     _VAL=$(echo "$1" | sed -r "s/^.*=(.*)/\1/g");
      _USED_NEXT=0
   else
      _VAL="$2"
      _USED_NEXT=1
   fi
 
-  case $param in
+  case "$param" in
     --help | -h)
       print_usage
       exit 0
@@ -68,18 +79,26 @@ while [[ $1 != "" ]]; do
       ;;
 
     --unzip)
-      unzip=$_VAL
+      unzip="$_VAL"
       shift $_USED_NEXT
       ;;
 
     --zip)
-      zip=$_VAL
+      zip="$_VAL"
       shift $_USED_NEXT
       ;;
 
     --zipnote)
-      zipnote=$_VAL
+      zipnote="$_VAL"
       shift $_USED_NEXT
+      ;;
+
+    --compact)
+      COMPACT=1
+      ;;
+
+    --compact2)
+      COMPACT=2
       ;;
 
     *)
@@ -107,8 +126,8 @@ if [[ ! -e "$zipnote" ]]; then
   exit 1
 fi
 
-rm -rf $TEST_DIR
-mkdir $TEST_DIR || {
+rm -rf "$TEST_DIR"
+mkdir "$TEST_DIR" || {
   echo "Error: test directory wasn't created!"
   exit 1
 }
@@ -123,8 +142,8 @@ FAILED=0
 PASSED=0
 SKIPPED=0 # some functions don't have to be available (e.g. bzip,...)
 ERRORS=0 # maybe will be able to used/implemented later
-__zip_version=$($zip -v | head -n 2 | tail -n 1 | cut -d " " -f 4)
-__unzip_version=$($unzip -vqqqq)
+__zip_version="$($zip -v | head -n 2 | tail -n 1 | cut -d " " -f 4)"
+__unzip_version="$($unzip -vqqqq)"
 
 __TEST_COUNTER=1
 
@@ -144,15 +163,15 @@ TEST_TITLE=""
 DTEST_DIR="$TEST_DIR/$TEST_DIR" # double testdir - for unzipped files
 
 set_title() {
-  TEST_TITLE="$@"
+  TEST_TITLE="$*"
 }
 
 clean_test_dir() {
-  rm -rf $TEST_DIR/* > /dev/null
+  rm -rf "$TEST_DIR"/* > /dev/null
 }
 
 test_failed() {
-  [ $PWD != $_SCRIPT_PWD ] && cd $_SCRIPT_PWD
+  [ "$PWD" != "$_SCRIPT_PWD" ] && cd "$_SCRIPT_PWD"
   clean_test_dir
   echo -e "[  ${red}FAIL${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
@@ -160,15 +179,16 @@ test_failed() {
 }
 
 test_passed() {
-  [ $PWD != $_SCRIPT_PWD ] && cd $_SCRIPT_PWD
+  [ "$PWD" != "$_SCRIPT_PWD" ] && cd "$_SCRIPT_PWD"
   clean_test_dir
+  [ $COMPACT -ne 1 ]
   echo -e "[  ${green}PASS${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
   PASSED=$[ $PASSED +1 ]
 }
 
 test_skipped() {
-  [ $PWD != $_SCRIPT_PWD ] && cd $_SCRIPT_PWD
+  [ "$PWD" != "$_SCRIPT_PWD" ] && cd "$_SCRIPT_PWD"
   clean_test_dir
   echo -e "[  ${cyan}SKIP${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
@@ -177,7 +197,7 @@ test_skipped() {
 
 # use this if you want print some error message
 log_error() {
-  echo "Error: TEST $__TEST_COUNTER: $@" >&2
+  echo "Error: TEST $__TEST_COUNTER: $*" >&2
 }
 
 #################################################
@@ -197,7 +217,7 @@ create_text() {
   # http://www.skorks.com/2010/03/how-to-quickly-generate-a-large-file-on-the-command-line-with-linux/
   # optional parameter for setting length of text
 
-  is_integer $1 && chars=$1 || chars=100000
+  is_integer "$1" && chars=$1 || chars=100000
   echo $(ruby -e 'a=STDIN.readlines;500.times do;b=[];20.times do;
            b << a[rand(a.size)].chomp end; puts b.join(" "); end' \
      < /usr/share/dict/words ) | head -c $chars
@@ -207,13 +227,13 @@ create_text() {
 # $1 prefix
 # $2 suffix
 create_unique_filename() {
-  echo $1 | grep -qE "^[a-zA-Z0-9_]+$"
-  [ $? -eq 0 ] && prefix=$1 || prefix="tmp_"
+  echo "$1" | grep -qE "^[a-zA-Z0-9_]+$"
+  [ $? -eq 0 ] && prefix="$1" || prefix="tmp_"
 
-  echo $1 | grep -qE "^[a-zA-Z0-9_]+$"
-  [ $? -eq 0 ] && suffix=$2 || suffix=""
+  echo "$2" | grep -qE "^[a-zA-Z0-9_]+$"
+  [ $? -eq 0 ] && suffix="$2" || suffix=""
 
-  file_counter=$( ls $TEST_DIR | wc -l )
+  file_counter=$( ls "$TEST_DIR" | wc -l )
   while [ 1 ]; do
     filename="${prefix}${file_counter}${suffix}"
 
@@ -228,9 +248,9 @@ create_unique_filename() {
 # long lines - 100k characters
 # parameter sets length of file - default 10k
 create_text_file() {
-  filename=$( echo -e "tmp_"$( ls $TEST_DIR | wc -l ))
-  is_integer $1 && chars=$1 || chars=10000
-  yes "$( create_text )" | head -c $chars > $TEST_DIR/$filename
+  filename="$( echo -e "tmp_"$( ls $TEST_DIR | wc -l ))"
+  is_integer "$1" && chars=$1 || chars=10000
+  yes "$( create_text )" | head -c $chars > "$TEST_DIR/$filename"
   echo $filename
 }
 
@@ -404,7 +424,7 @@ test_6() {
 
   $zip -u $TEST_DIR/archive $TEST_DIR/tmp_0 $TEST_DIR/$filename
   test_ecode 0 $? || return 1
-  
+
   $unzip -d $TEST_DIR $TEST_DIR/archive.zip
   [ -f $DTEST_DIR/tmp_0 -a -f $DTEST_DIR/tmp_1 -a -f $DTEST_DIR/$filename ] || {
     log_error "unzipped: archive doesn't contain all expected files"
@@ -438,7 +458,7 @@ test_8() {
   touch $TEST_DIR/archive $TEST_DIR/tmp_0 $TEST_DIR/tmp_1 $TEST_DIR/tmp_2
 
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0 $TEST_DIR/tmp_1 $TEST_DIR/tmp_2
-  lines=$( $zip -sf $TEST_DIR/archive | grep "tmp_[012]$" | wc -l )
+  lines=$( $zip -sf $TEST_DIR/archive | grep -c "tmp_[012]$" )
   [ $lines -eq 3 ] || {
      log_error "-sf option print wrong output"
      return 1
@@ -457,7 +477,7 @@ test_9() {
   $zip -d $TEST_DIR/archive $TEST_DIR/tmp_1
 
   test_ecode 0 $? || return 1
-  lines=$( $zip -sf $TEST_DIR/archive | grep "tmp_[012]$" | wc -l )
+  lines=$( $zip -sf $TEST_DIR/archive | grep -c "tmp_[012]$" )
   $zip -sf $TEST_DIR/archive | grep -q "tmp_1"
   [ $? -eq 1 -a $lines -eq 2 ] || {
     log_error "File was not removed or something is wrong with other files"
@@ -501,7 +521,7 @@ test_12() {
   $zip -u $TEST_DIR/archive $TEST_DIR/tmp_1 # > $TEST_DIR/log
   test_ecode 12 $? || return 1
 
-  return 0     
+  return 0
 }
 
 # update archive - original file removed | 12
@@ -562,13 +582,13 @@ test_17() {
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0
   $zip -d $TEST_DIR/archive $TEST_DIR/tmp_0 > $TEST_DIR/log
   test_ecode 0 $? || return 1
-  
+
   grep -E "warning.*empty" $TEST_DIR/log || {
     log_error "Wrong of missing warning"
     return 1
   }
 
-  return 0  
+  return 0
 }
 
 # wrong commandline parameters | 16
@@ -635,7 +655,7 @@ test_23() {
   set_title "Generic zipfile format error"
   echo "Lorem ipsum, whatever..." > $TEST_DIR/archive.zip
   $zip -T $TEST_DIR/archive.zip
-  test_ecode 3 $? || return 1 
+  test_ecode 3 $? || return 1
   return 0
 }
 
@@ -801,7 +821,7 @@ test_33() {
     log_error "Unzziped file is symlink, but it shouldn't (option \"--symlinks\" wasn't used)"
     return 1
   }
-  
+
   diff -q $TEST_DIR/tmp_0 $DTEST_DIR/symlink_file && \
     diff -q $TEST_DIR/tmp_0 $DTEST_DIR/tmp_0 || {
       log_error "Unzipped files are different (symlink)"
@@ -832,7 +852,7 @@ test_34() {
   $zip -r --symlinks $TEST_DIR/archive.zip $TEST_DIR/* >/dev/null
   test_ecode 0 $? || return 1
 
-  $unzip -d $TEST_DIR $TEST_DIR/archive.zip 2>&1 > $TEST_DIR/log_unzip
+  $unzip -d $TEST_DIR $TEST_DIR/archive.zip > "$TEST_DIR/log_unzip" 2>&1
   status=$?
   [ $status -ne 0 ] && {
     log_error "Unzip: return $status but expected is 0 (Archive contains symlink and many files)"
@@ -860,7 +880,7 @@ test_34() {
     return 1
   }
 
-  lines=$(cat $TEST_DIR/log_unzip | grep -E "\->\s*(tmp_[0-9]+|some/juhuu)$" | wc -l)
+  lines=$(cat $TEST_DIR/log_unzip | grep -cE "\->\s*(tmp_[0-9]+|some/juhuu)$" )
   [ $lines -ne 103 ] && {
     ## this archive is not affected by unzip bug https://bugzilla.redhat.com/show_bug.cgi?id=740012
     ## if someone can create such archive here, please write me or send me patch/new test
@@ -900,7 +920,7 @@ test_36() {
     log_error "Freshen  - added files (or changed report!)"
     return 1
   }
-  
+
   return 0
 }
 
@@ -944,7 +964,7 @@ test_39() {
   yes "$text" | zip -c $TEST_DIR/archive $TEST_DIR/tmp_*
   test_ecode 0 $? || return 1
 
-  lines=$($zipnote $TEST_DIR/archive.zip | grep "$text" | wc -l)
+  lines=$($zipnote $TEST_DIR/archive.zip | grep -c "$text")
   [ $lines -ne 3 ] && {
     log_error "Comments weren't added of error in zipnote"
     return 1
@@ -1030,6 +1050,15 @@ test_44() {
   return 0
 }
 
+test_45() {
+  set_title "Unzip multi-archive (exit code ignored)"
+  filename="$( create_text_file $[ 2**20 * 100 ] )"
+  $zip "$TEST_DIR/"
+}
+
+test_46() {
+  set_title "Unzip multi-archive (check exit code)"
+}
 
 
 # Do not edit next lines!
@@ -1049,7 +1078,7 @@ __tests_startline=$(grep -nm 1 "# TESTS BEGIN" $scriptname | cut -d ":" -f 1)
 __tests_endline=$(grep -nm 1 "# TESTS ENDS" $scriptname | cut -d ":" -f 1)
 __tests_lines=$[ $__tests_endline - $__tests_startline ]
 __file_lines=$(wc -l $scriptname | cut -d " " -f 1)
-__tests_functions=$(cat $scriptname | tail -n $[ $__file_lines - $__tests_startline ] \
+__tests_functions=$(cat "$scriptname" | tail -n $[ $__file_lines - $__tests_startline ] \
   | head -n $__tests_lines | grep -E "^\s*[_a-zA-Z0-9]+\s*\(\)\s*\{" \
   | grep -oE "^\s*[_a-zA-Z0-9]+"; )
 for item in $__tests_functions; do
