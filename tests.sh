@@ -22,6 +22,7 @@ TEST_DIR="test_dir"
 cd "${0%$scriptname}"
 _SCRIPT_PWD="$PWD"
 COMPACT=0
+__tmp_output=""
 
 
 #################################################
@@ -47,7 +48,12 @@ print_usage() {
 
     --compact2      Print results twice - during testing and after tests.
                     You will see results together and then find err messages
-                    responding to results.
+                    responding to results from utilities too.
+
+    --compact3      Similar to --compact2, but print logged errors between
+                    compact output to STDOUT. Logged errors are print by tests
+                    itself and are not part of tested utilities.
+                    Logged errors are usually print to STDERR during testing.
 
     -h, --help      Print this help.
 "
@@ -99,6 +105,10 @@ while [[ $1 != "" ]]; do
 
     --compact2)
       COMPACT=2
+      ;;
+
+    --compact3)
+      COMPACT=3
       ;;
 
     *)
@@ -174,6 +184,8 @@ test_failed() {
   [ "$PWD" != "$_SCRIPT_PWD" ] && cd "$_SCRIPT_PWD"
   clean_test_dir
   echo -e "[  ${red}FAIL${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
+  [ $COMPACT -gt 1 ] && \
+    __tmp_output="${__tmp_output}\n[  ${red}FAIL${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
   FAILED=$[ $FAILED +1 ]
 }
@@ -183,6 +195,8 @@ test_passed() {
   clean_test_dir
   [ $COMPACT -ne 1 ]
   echo -e "[  ${green}PASS${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
+  [ $COMPACT -gt 1 ] && \
+    __tmp_output="${__tmp_output}\n[  ${green}PASS${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
   PASSED=$[ $PASSED +1 ]
 }
@@ -191,6 +205,8 @@ test_skipped() {
   [ "$PWD" != "$_SCRIPT_PWD" ] && cd "$_SCRIPT_PWD"
   clean_test_dir
   echo -e "[  ${cyan}SKIP${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
+  [ $COMPACT -gt 1 ] && \
+    __tmp_output="${__tmp_output}\n[  ${cyan}SKIP${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
   SKIPPED=$[ $SKIPPED +1 ]
 }
@@ -198,6 +214,7 @@ test_skipped() {
 # use this if you want print some error message
 log_error() {
   echo "Error: TEST $__TEST_COUNTER: $*" >&2
+  [ $COMPACT -eq 3 ] && __tmp_output="${__tmp_output}\nError: TEST $__TEST_COUNTER: $*"
 }
 
 #################################################
@@ -1082,9 +1099,20 @@ __tests_functions=$(cat "$scriptname" | tail -n $[ $__file_lines - $__tests_star
   | head -n $__tests_lines | grep -E "^\s*[_a-zA-Z0-9]+\s*\(\)\s*\{" \
   | grep -oE "^\s*[_a-zA-Z0-9]+"; )
 for item in $__tests_functions; do
-  $item >&2 && { test_passed; continue; }
+  if [[ $COMPACT -eq 1 ]]; then
+    $item >/dev/null 2>/dev/null && { test_passed; continue; }
+  else
+    $item >&2 && { test_passed; continue; }
+  fi
   [ $? -eq 1 ] && test_failed || test_skipped
 done
+
+[ $COMPACT -gt 1 ] && echo -e "
+================================================
+=                COMPACT RESULTS               =
+================================================
+$__tmp_output
+"
 
 #################################################
 # RESULTS                                       #
