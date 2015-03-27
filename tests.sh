@@ -31,7 +31,7 @@ __tmp_output=""
 print_usage() {
   echo "
  tests.sh [--nocolors] [--unzip FILE] [--zip FILE] [--zipnote FILE]
-          [-h | --help]
+          [-c | --compact VAL] [-h | --help]
 
     --nocolors      No colored output
 
@@ -44,16 +44,22 @@ print_usage() {
     --zipnote FILE  Will be used this script as zipnote
                     Default: $(which zipnote)
 
-    --compact       Print results together after end of testing
+    -c, --compact VAL
+                    Create compact output. VAL can be number 1..5.
+                    1 - suppress output from  utilities and error messages
+                        and print only basic info about tests.
 
-    --compact2      Print results twice - during testing and after tests.
-                    You will see results together and then find err messages
-                    responding to results from utilities too.
+                    2 - print whole output and basic info about success of each
+                        test print one more time after ends of tests
 
-    --compact3      Similar to --compact2, but print logged errors between
-                    compact output to STDOUT. Logged errors are print by tests
-                    itself and are not part of tested utilities.
-                    Logged errors are usually print to STDERR during testing.
+                    3 - similar to 2, but logged errors are print by between
+                        compact output after tests are completed. In this case
+                        these errors are printed to STDOUT istead of STDERR
+
+                    4 - similar to 3 with suppressed output from utilities,
+                        but prints basic info about test (it's like progress)
+
+                    5 - similar to 4, but suppressed any output during testing
 
     -h, --help      Print this help.
 "
@@ -64,7 +70,7 @@ print_usage() {
 #################################################
 NOCOLORS=0
 while [[ $1 != "" ]]; do
-  param="$(echo $1 | sed -r "s/^(.*)=.*/\1/")"
+  param="$(echo "$1" | sed -r "s/^(.*)=.*/\1/")"
 
   if [[ "$param" != "$1"  ]]; then
      _VAL=$(echo "$1" | sed -r "s/^.*=(.*)/\1/g");
@@ -99,16 +105,14 @@ while [[ $1 != "" ]]; do
       shift $_USED_NEXT
       ;;
 
-    --compact)
-      COMPACT=1
-      ;;
-
-    --compact2)
-      COMPACT=2
-      ;;
-
-    --compact3)
-      COMPACT=3
+    -c | --compact)
+      echo "$_VAL" | grep -qE "^[1-5]$"
+      [ $? -ne 0 ] && {
+        echo "Wrong parameter of compact! Only value from 1 to 5 can be used!" >&2
+        exit 1;
+      }
+      COMPACT=$_VAL
+      shift $_USED_NEXT
       ;;
 
     *)
@@ -183,7 +187,8 @@ clean_test_dir() {
 test_failed() {
   [ "$PWD" != "$_SCRIPT_PWD" ] && cd "$_SCRIPT_PWD"
   clean_test_dir
-  echo -e "[  ${red}FAIL${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
+  [ $COMPACT -ne 5 ] && \
+    echo -e "[  ${red}FAIL${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   [ $COMPACT -gt 1 ] && \
     __tmp_output="${__tmp_output}\n[  ${red}FAIL${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
@@ -193,8 +198,8 @@ test_failed() {
 test_passed() {
   [ "$PWD" != "$_SCRIPT_PWD" ] && cd "$_SCRIPT_PWD"
   clean_test_dir
-  [ $COMPACT -ne 1 ]
-  echo -e "[  ${green}PASS${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
+  [ $COMPACT -ne 5 ] && \
+    echo -e "[  ${green}PASS${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   [ $COMPACT -gt 1 ] && \
     __tmp_output="${__tmp_output}\n[  ${green}PASS${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
@@ -204,7 +209,8 @@ test_passed() {
 test_skipped() {
   [ "$PWD" != "$_SCRIPT_PWD" ] && cd "$_SCRIPT_PWD"
   clean_test_dir
-  echo -e "[  ${cyan}SKIP${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
+  [ $COMPACT -ne 5 ] && \
+    echo -e "[  ${cyan}SKIP${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   [ $COMPACT -gt 1 ] && \
     __tmp_output="${__tmp_output}\n[  ${cyan}SKIP${endColor}  ] TEST ${__TEST_COUNTER}: $TEST_TITLE"
   __TEST_COUNTER=$[ $__TEST_COUNTER +1 ]
@@ -214,7 +220,7 @@ test_skipped() {
 # use this if you want print some error message
 log_error() {
   echo "Error: TEST $__TEST_COUNTER: $*" >&2
-  [ $COMPACT -eq 3 ] && __tmp_output="${__tmp_output}\nError: TEST $__TEST_COUNTER: $*"
+  [ $COMPACT -gt 2 ] && __tmp_output="${__tmp_output}\nError: TEST $__TEST_COUNTER: $*"
 }
 
 #################################################
@@ -1041,7 +1047,7 @@ test_43() {
 test_44() {
   set_title "Split archive"
   filename="$( create_text_file $[ 2**20 ] )"
-  $zip "$TEST_DIR/archive_split" -s 128k "$TEST_DIR/$filename"
+  $zip "$TEST_DIR/archive_split" -s 128k "$TEST_DIR/$filename" 
 
   # we must check sum size of archive and then calculate
   # how many files we want..
@@ -1068,13 +1074,17 @@ test_44() {
 }
 
 test_45() {
-  set_title "Unzip multi-archive (exit code ignored)"
+  set_title "Unzip segmented archive (exit code ignored)"
   filename="$( create_text_file $[ 2**20 * 100 ] )"
-  $zip "$TEST_DIR/"
+  $zip "$TEST_DIR/archive_split" -s 128k "$TEST_DIR/$filename" || {
+    log_error "Zip fail during compression of segmented archive"
+    return 1
+  }
 }
 
 test_46() {
-  set_title "Unzip multi-archive (check exit code)"
+  set_title "Unzip segmented archive (check exit code)"
+  return 2
 }
 
 
@@ -1099,7 +1109,7 @@ __tests_functions=$(cat "$scriptname" | tail -n $[ $__file_lines - $__tests_star
   | head -n $__tests_lines | grep -E "^\s*[_a-zA-Z0-9]+\s*\(\)\s*\{" \
   | grep -oE "^\s*[_a-zA-Z0-9]+"; )
 for item in $__tests_functions; do
-  if [[ $COMPACT -eq 1 ]]; then
+  if [ $COMPACT -eq 1  -o  $COMPACT -ge 4 ]; then
     $item >/dev/null 2>/dev/null && { test_passed; continue; }
   else
     $item >&2 && { test_passed; continue; }
