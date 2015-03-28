@@ -23,6 +23,7 @@ cd "${0%$scriptname}"
 _SCRIPT_PWD="$PWD"
 COMPACT=0
 __tmp_output=""
+only_test=""
 
 
 #################################################
@@ -31,7 +32,7 @@ __tmp_output=""
 print_usage() {
   echo "
  tests.sh [--nocolors] [--unzip FILE] [--zip FILE] [--zipnote FILE]
-          [-c | --compact VAL] [-h | --help]
+          [-c | --compact VAL] [ --run-test test_function ] [-h | --help]
 
     --nocolors      No colored output
 
@@ -43,6 +44,9 @@ print_usage() {
 
     --zipnote FILE  Will be used this script as zipnote
                     Default: $(which zipnote)
+
+    --run-test test_function
+                    Run only test with same name of function
 
     -c, --compact VAL
                     Create compact output. VAL can be number 1..5.
@@ -105,6 +109,11 @@ while [[ $1 != "" ]]; do
       shift $_USED_NEXT
       ;;
 
+    --run-test)
+      only_test="$_VAL"
+      shift $_USED_NEXT
+      ;;
+
     -c | --compact)
       echo "$_VAL" | grep -qE "^[1-5]$"
       [ $? -ne 0 ] && {
@@ -139,6 +148,19 @@ if [[ ! -e "$zipnote" ]]; then
   echo "Script Error: File $zipnote doesn't exists." >&2
   exit 1
 fi
+
+for i in "diff" "cmp"; do
+  which $i >/dev/null 2>/dev/null && [[ -f "$(which $i)" ]] || {
+    echo "Script error: Utility $i is missing! This utility is required for testing!" >&2
+    exit 1
+  }
+done
+
+
+[ -n "$TEST_DIR" ] || {
+  echo "EMPTY destination of TEST_DIR!! Threatens remove of all files on disk!" >2&
+  exit 2
+}
 
 rm -rf "$TEST_DIR"
 mkdir "$TEST_DIR" || {
@@ -181,6 +203,10 @@ set_title() {
 }
 
 clean_test_dir() {
+  [ -n "$TEST_DIR" ] || {
+    echo "EMPTY destination of TEST_DIR!! Threatens remove of all files on disk!" >2&
+    exit 2
+  }
   rm -rf "$TEST_DIR"/* > /dev/null
 }
 
@@ -361,7 +387,7 @@ test_ecode() {
 
 # create archive | success 0
 test_1 () {
-  set_title "Create archive.zip - unzip,diff verify"
+  set_title "Create archive.zip - unzip, cmp verify"
   filename=$( create_text_file )
   $zip $TEST_DIR/archive.zip $TEST_DIR/$filename
   test_ecode 0 $? || return 1
@@ -373,12 +399,12 @@ test_1 () {
     return 1
   }
 
-  [ ! -f $DTEST_DIR/$filename ] && {
+  [ ! -f "$DTEST_DIR/$filename" ] && {
      log_error "Unzipped archive doesn't contain archived file."
      return 1
   }
 
-  diff -q $DTEST_DIR/$filename $TEST_DIR/$filename || {
+  cmp -s "$DTEST_DIR/$filename" "$TEST_DIR/$filename" || {
     log_error "Unzipped file is different!"
     return 1
   }
@@ -438,7 +464,7 @@ test_5() {
 
 # update archive - verify with unzip | success
 test_6() {
-  set_title "Update archive - add new file and replace existing - unzip,diff verify"
+  set_title "Update archive - add new file and replace existing - unzip, cmp verify"
   touch $TEST_DIR/tmp_0 $TEST_DIR/tmp_1
   filename=$( create_text_file )
   $zip $TEST_DIR/archive $TEST_DIR/tmp_0 $TEST_DIR/tmp_1
@@ -454,10 +480,10 @@ test_6() {
     return 1
   }
 
-  diff -q $DTEST_DIR/tmp_0 $TEST_DIR/tmp_0 && \
-    diff -q $DTEST_DIR/$filename $TEST_DIR/$filename &&
-    diff -q $DTEST_DIR/tmp_1 $TEST_DIR/tmp_1 || {
-      log_error "unzipped - diff: files are different"
+  cmp -s "$DTEST_DIR/tmp_0" "$TEST_DIR/tmp_0" && \
+    cmp -s "$DTEST_DIR/$filename" "$TEST_DIR/$filename" &&
+    cmp -s "$DTEST_DIR/tmp_1" "$TEST_DIR/tmp_1" || {
+      log_error "unzipped files are different"
       return 1
   }
 
@@ -817,7 +843,7 @@ test_32() {
     return 1
   }
 
-  diff -q $TEST_DIR/tmp_0 $DTEST_DIR/symlink_file || {
+  cmp -s "$TEST_DIR/tmp_0" "$DTEST_DIR/symlink_file" || {
     log_error "Unzipped files are different (symlink)"
     return 1
   }
@@ -845,8 +871,8 @@ test_33() {
     return 1
   }
 
-  diff -q $TEST_DIR/tmp_0 $DTEST_DIR/symlink_file && \
-    diff -q $TEST_DIR/tmp_0 $DTEST_DIR/tmp_0 || {
+  cmp -s "$TEST_DIR/tmp_0" "$DTEST_DIR/symlink_file" && \
+    cmp -s "$TEST_DIR/tmp_0" "$DTEST_DIR/tmp_0" || {
       log_error "Unzipped files are different (symlink)"
       return 1
     }
@@ -1047,7 +1073,7 @@ test_43() {
 test_44() {
   set_title "Split archive"
   filename="$( create_text_file $[ 2**20 ] )"
-  $zip "$TEST_DIR/archive_split" -s 128k "$TEST_DIR/$filename" 
+  $zip "$TEST_DIR/archive_split" -s 128k "$TEST_DIR/$filename"
 
   # we must check sum size of archive and then calculate
   # how many files we want..
@@ -1074,17 +1100,63 @@ test_44() {
 }
 
 test_45() {
-  set_title "Unzip segmented archive (exit code ignored)"
+  set_title "Unzip segmented archive - single file"
   filename="$( create_text_file $[ 2**20 * 100 ] )"
-  $zip "$TEST_DIR/archive_split" -s 128k "$TEST_DIR/$filename" || {
+  $zip "$TEST_DIR/archive_split" -s 1m "$TEST_DIR/$filename" || {
     log_error "Zip fail during compression of segmented archive"
+    return 2 # skip because this is problem of zip
+  }
+
+  $unzip -d "$TEST_DIR" "$TEST_DIR/archive_split"
+  test_ecode 0 $? || return 1
+
+  [ -e "$DTEST_DIR/$filename" ] || {
+    log_error "unzipped file can't be found! Probably wasn't created."
     return 1
   }
+
+  cmp -s "$TEST_DIR/$filename" "$DTEST_DIR/$filename" || {
+    log_error "Unzipped file is different from original!"
+    return 1
+  }
+
+  return 0
 }
 
 test_46() {
-  set_title "Unzip segmented archive (check exit code)"
-  return 2
+  set_title "Unzip segmented archive - many files"
+  filename="$( create_text_file $[ 2**20 * 100 ] )"
+  $zip "$TEST_DIR/archive_split" -s 1m "$TEST_DIR/$filename" && \
+   $zip "$TEST_DIR/double_split" -s 128k "$TEST_DIR"/archive_split* || {
+    log_error "Zip fail during compression of segmented archive"
+    exit 0
+    return 2 # skip because this is problem of zip
+  }
+
+  $unzip -d "$TEST_DIR" "$TEST_DIR/double_split"
+  test_ecode 0 $? || return 1
+
+  [ -e "$DTEST_DIR" ] || {
+    log_error "Destination directory wasn't created."
+    return 1
+  }
+
+  original_files=$(ls "$TEST_DIR"/double_split* | wc -l)
+  output_files=$(ls "$DTEST_DIR"/arhive_split | wc -l)
+  [ $original_files -eq $output_files ] || {
+    log_error "Different count of files! Originally: $original_files - Unzipped: $output_files"
+    return 1
+  }
+
+  $unzip -d "$TEST_DIR" "$DTEST_DIR/archive_split"
+  test_ecode 0 $? | return 1
+
+  cmp -s "$TEST_DIR/$filename" "$DTEST_DIR/$filename" || {
+    log_error "Unzipped file is different from original!"
+    return 1
+  }
+
+  return 0
 }
 
 
@@ -1109,6 +1181,9 @@ __tests_functions=$(cat "$scriptname" | tail -n $[ $__file_lines - $__tests_star
   | head -n $__tests_lines | grep -E "^\s*[_a-zA-Z0-9]+\s*\(\)\s*\{" \
   | grep -oE "^\s*[_a-zA-Z0-9]+"; )
 for item in $__tests_functions; do
+  [ -n "$only_test" ] && {
+    [ "$item" == "$only_test" ] || continue
+  }
   if [ $COMPACT -eq 1  -o  $COMPACT -ge 4 ]; then
     $item >/dev/null 2>/dev/null && { test_passed; continue; }
   else
@@ -1137,5 +1212,11 @@ Passed:       $PASSED
 Failed:       $FAILED
 Skipped:      $SKIPPED
 "
+
+[ -n "$TEST_DIR" ] || {
+  echo "EMPTY destination of TEST_DIR!! Threatens remove of all files on disk!" >2&
+  exit 2
+}
+
 rm -rf $TEST_DIR # clean mess
 
