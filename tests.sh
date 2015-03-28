@@ -1129,8 +1129,7 @@ test_46() {
   $zip "$TEST_DIR/archive_split" -s 1m "$TEST_DIR/$filename" && \
    $zip "$TEST_DIR/double_split" -s 128k "$TEST_DIR"/archive_split* || {
     log_error "Zip fail during compression of segmented archive"
-    exit 0
-    return 2 # skip because this is problem of zip
+    return 1
   }
 
   $unzip -d "$TEST_DIR" "$TEST_DIR/double_split"
@@ -1159,6 +1158,52 @@ test_46() {
   return 0
 }
 
+test_47() {
+  set_title "Unzip single archive - removed first n bytes"
+  filename=$( create_text_file )
+  $zip "$TEST_DIR/archive" "$TEST_DIR/$filename" || {
+    log_error "Zip fail during compression"
+    return 1
+  }
+
+  tail -c +20 "$TEST_DIR/archive.zip" > "$TEST_DIR/damaged_archive.zip"
+  $unzip -d "$TEST_DIR" "$TEST_DIR/damaged_archive.zip"
+  test_ecode 3 $? || return 1
+
+  return 0
+}
+
+test_48() {
+  set_title "Unzip segmented archive - removed first n bytes from first segment"
+  filename="$( create_text_file $[ 2**20 * 10 ] )"
+  $zip "$TEST_DIR/archive_split" -s 1m "$TEST_DIR/$filename" || {
+    log_error "Zip fail during compression of segmented archive"
+    return 1
+  }
+
+  tail -c +20 "$TEST_DIR/archive_split.z01" > "$TEST_DIR/segment.z01"
+  mv "$TEST_DIR/segment.z01" "$TEST_DIR/segment.z01"
+  $unzip -d "$TEST_DIR" "$TEST_DIR/archive_split.zip"
+  test_ecode 2 $? || return 1
+
+  # may add check if other files  (from other segments) are decompressed
+  # in that case add more files to archive
+
+  return 0
+}
+
+test_49() {
+  set_title "Unzip sgmnt arch. - remove n bounded bytes from some segment"
+  return 2 # don't test this now
+
+  filename="$( create_text_file $[ 2**20 * 10 ] )"
+  $zip "$TEST_DIR/archive_split" -s 1m "$TEST_DIR/$filename" || {
+    log_error "Zip fail during compression of segmented archive"
+    return 1
+  }
+
+  return 0
+}
 
 # Do not edit next lines!
 # TESTS ENDS
