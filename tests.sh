@@ -1025,7 +1025,7 @@ test_39() {
 test_40() {
   # when patch will be created, this test should be modified
   # because probably new option will be created
-  set_title "Acrhive with too long filename - unzip (may it will not be fixed)"
+  set_title "Archive with too long filename - unzip (may it will not be fixed)"
   ## skip if you forgot copy special test archives too
   [ -f "too_long_filename.zip" ] || return 2
   cp too_long_filename.zip $TEST_DIR/too_long_filename.zip
@@ -1095,6 +1095,22 @@ test_44() {
   #TODO add zip -FF and join everything back together.
   # then unzip archive and compare result
   # it's good check before testing of support by unzip
+  $zip -FF "$TEST_DIR/archive_split.zip" --out "$TEST_DIR/archive_merged.zip"
+  test_ecode 0 $? || {
+    log_error "Merge of split archiv through -FF failed."
+    return 1
+  }
+
+  $unzip -d "$TEST_DIR" "$TEST_DIR/archive_merged.zip"
+  test_ecode 0 $? || {
+    log_error "Merged archive can't be unzipped by unzip."
+    return 1
+  }
+
+  cmp -s "$DTEST_DIR/$filename" "$TEST_DIR/$filename" || {
+    log_error "Unzipped file is different from original!"
+    return 1
+  }
 
   return 0
 }
