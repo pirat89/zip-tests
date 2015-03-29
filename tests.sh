@@ -1026,11 +1026,11 @@ test_40() {
   # when patch will be created, this test should be modified
   # because probably new option will be created
   set_title "Acrhive with too long filename - unzip (may it will not be fixed)"
-  ## skip if you you forget copy special test archives too
+  ## skip if you forgot copy special test archives too
   [ -f "too_long_filename.zip" ] || return 2
   cp too_long_filename.zip $TEST_DIR/too_long_filename.zip
 
-  $unzip -l $TEST_DIR/too_long_filename.zip | head -n4 | tail -n1 | cut -d " " -t 15- \
+  $unzip -l $TEST_DIR/too_long_filename.zip | head -n4 | tail -n1 | cut -d " " -f 15- \
     | grep "^[[:space:][:alnum:]_-]+$" || return 1
   return 0
 }
@@ -1140,8 +1140,8 @@ test_46() {
     return 1
   }
 
-  original_files=$(ls "$TEST_DIR"/double_split* | wc -l)
-  output_files=$(ls "$DTEST_DIR"/arhive_split | wc -l)
+  original_files=$(ls "$TEST_DIR"/archive_split* | wc -l)
+  output_files=$(ls "$DTEST_DIR"/archive_split* | wc -l)
   [ $original_files -eq $output_files ] || {
     log_error "Different count of files! Originally: $original_files - Unzipped: $output_files"
     return 1
@@ -1182,7 +1182,7 @@ test_48() {
   }
 
   tail -c +20 "$TEST_DIR/archive_split.z01" > "$TEST_DIR/segment.z01"
-  mv "$TEST_DIR/segment.z01" "$TEST_DIR/segment.z01"
+  mv "$TEST_DIR/segment.z01" "$TEST_DIR/archive_split.z01"
   $unzip -d "$TEST_DIR" "$TEST_DIR/archive_split.zip"
   test_ecode 2 $? || return 1
 
