@@ -25,6 +25,9 @@ COMPACT=0
 __tmp_output=""
 only_test=""
 
+home_expand() {
+  echo "$1" | grep -q "^~/" && echo "$HOME${1#\~}" || echo "$1"
+}
 
 #################################################
 # USAGE
@@ -95,17 +98,17 @@ while [[ $1 != "" ]]; do
       ;;
 
     --unzip)
-      unzip="$_VAL"
+      unzip="$(home_expand "$_VAL")"
       shift $_USED_NEXT
       ;;
 
     --zip)
-      zip="$_VAL"
+      zip="$(home_expand "$_VAL")"
       shift $_USED_NEXT
       ;;
 
     --zipnote)
-      zipnote="$_VAL"
+      zipnote="$(home_expand "$_VAL")"
       shift $_USED_NEXT
       ;;
 
@@ -276,10 +279,10 @@ create_text() {
 # $1 prefix
 # $2 suffix
 create_unique_filename() {
-  echo "$1" | grep -qE "^[a-zA-Z0-9_]+$"
+  echo "$1" | grep -qE "^[a-zA-Z0-9_.]+$"
   [ $? -eq 0 ] && prefix="$1" || prefix="tmp_"
 
-  echo "$2" | grep -qE "^[a-zA-Z0-9_]+$"
+  echo "$2" | grep -qE "^[a-zA-Z0-9_.]+$"
   [ $? -eq 0 ] && suffix="$2" || suffix=""
 
   file_counter=$( ls "$TEST_DIR" | wc -l )
@@ -685,7 +688,7 @@ test_21() {
   set_title "Test the integrity of archive (success)"
   filename=$( create_text_file 1000 )
   $zip $TEST_DIR/archive.zip $TEST_DIR/$filename
-  $zip -T $TEST_DIR/archive.zip
+  $zip -T $TEST_DIR/archive.zip -TT "$unzip -tqq"
   test_ecode 0 $? || return 1
 
   return 0
@@ -694,7 +697,7 @@ test_21() {
 test_22() {
   set_title "Test the integrity of the new archive (damaged file)"
   archive=$( create_easy_damaged_archive )
-  $zip -T $TEST_DIR/$archive
+  $zip -T $TEST_DIR/$archive -TT "$unzip -tqq"
   test_ecode 8 $? || return 1
 
   return 0
@@ -703,7 +706,7 @@ test_22() {
 test_23() {
   set_title "Generic zipfile format error"
   echo "Lorem ipsum, whatever..." > $TEST_DIR/archive.zip
-  $zip -T $TEST_DIR/archive.zip
+  $zip -T $TEST_DIR/archive.zip -TT "$unzip -tqq"
   test_ecode 3 $? || return 1
   return 0
 }
@@ -723,7 +726,7 @@ test_24() {
   test_ecode 0 $? || return 1
 
   # test the integrity of archive again
-  $zip -T $TEST_DIR/$archive
+  $zip -T $TEST_DIR/$archive -TT "$unzip -tqq"
   test_ecode 0 $? || return 1
 
   return 0
@@ -980,7 +983,7 @@ test_37() {
   $zip $TEST_DIR/archive $TEST_DIR/$filename
   size=$[ $(wc -c $TEST_DIR/archive.zip | cut -d " " -f 1) - 5 ]
   truncate --size $size $TEST_DIR/archive.zip
-  $zip -T $TEST_DIR/archive
+  $zip -T $TEST_DIR/archive -TT "$unzip -tqq"
   test_ecode 2 $? || return 1
 
   ## -F and also -FF do not repair truncated end of archive
@@ -1092,7 +1095,7 @@ test_44() {
     return 1
   }
 
-  #TODO add zip -FF and join everything back together.
+  #zip -FF and join everything back together.
   # then unzip archive and compare result
   # it's good check before testing of support by unzip
   $zip -FF "$TEST_DIR/archive_split.zip" --out "$TEST_DIR/archive_merged.zip"
@@ -1164,7 +1167,7 @@ test_46() {
   }
 
   $unzip -d "$TEST_DIR" "$DTEST_DIR/archive_split"
-  test_ecode 0 $? | return 1
+  test_ecode 0 $? || return 1
 
   cmp -s "$TEST_DIR/$filename" "$DTEST_DIR/$filename" || {
     log_error "Unzipped file is different from original!"
@@ -1220,6 +1223,32 @@ test_49() {
 
   return 0
 }
+
+# not possible - that's good
+#test_50() {
+#  set_title "CDR header in two files"
+#  [ -x "/usr/bin/python" ] || return 2
+#  return 2
+#  filename="$( create_text_file $[ 2**20 * 200 ] )"
+#  exit
+#  $zip "$TEST_DIR/archive_split" -s 128k "$TEST_DIR/$filename" || {
+#    log_error "Zip fail during compression of segmented archive"
+#    return 1
+#  }
+#
+#  amount="131072"
+#  while [ 1 ]; do
+#    count=$( ls "$TEST_DIR"/archive_split* | wc -l )
+#    count=$(( count - 1 ))
+#    [ $count -lt 10 ] && count="0${count}"
+#    ./script "$TEST_DIR/archive_split.zip" "$TEST_DIR/archive_split.z${count}" && exit 0
+#    rm -rf "$TEST_DIR"/archive_split*
+#    amount=$(( amount + 1 ))
+#    $zip "$TEST_DIR/archive_split" -s "$amount" "$TEST_DIR/$filename" || return 1
+#  done
+#
+#  return 0
+#}
 
 # Do not edit next lines!
 # TESTS ENDS
