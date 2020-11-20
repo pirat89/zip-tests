@@ -24,6 +24,7 @@ _SCRIPT_PWD="$PWD"
 COMPACT=0
 __tmp_output=""
 only_test=""
+SYSTEM=$(uname -s 2>/dev/null) || SYSTEM="unknown"
 
 home_expand() {
   echo "$1" | grep -q "^~/" && echo "$HOME${1#\~}" || echo "$1"
@@ -270,9 +271,17 @@ create_text() {
   # optional parameter for setting length of text
 
   is_integer "$1" && chars=$1 || chars=100000
+  case "$SYSTEM" in
+    SunOS)
+      DICT_WORDS=/usr/share/lib/dict/words
+      ;;
+    *)
+      DICT_WORDS=/usr/share/dict/words
+      ;;
+    esac
   echo $(ruby -e 'a=STDIN.readlines;500.times do;b=[];20.times do;
            b << a[rand(a.size)].chomp end; puts b.join(" "); end' \
-     < /usr/share/dict/words ) | head -c $chars
+     < $DICT_WORDS ) | head -c $chars
 }
 
 # create unique filename for files in $TEST_DIR
@@ -1309,4 +1318,3 @@ Skipped:      $SKIPPED
 }
 
 rm -rf $TEST_DIR # clean mess
-
